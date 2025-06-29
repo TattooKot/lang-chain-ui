@@ -34,7 +34,6 @@ const theme = createTheme({
 
 function App() {
     const [input, setInput] = useState("");
-    // sessions: { id: string, channelArn: string, messages: [] }
     const [sessions, setSessions] = useState([]);
     const [activeIndex, setActiveIndex] = useState(null);
     const [streaming, setStreaming] = useState(false);
@@ -61,31 +60,23 @@ function App() {
         if (activeIndex === null) return;
         const sess = sessions[activeIndex];
         if (!sess || !sess.channelArn) return;
+        // якщо повідомлення вже завантажені — більше не запитуємо
+        if (sess.messages.length > 0) return;
 
         fetch(`${API}/chime/history/${sess.id}`)
             .then((r) => r.json())
             .then((history) => {
-                const messages = history.map((m) => {
-                    let role = "assistant";
-                    if (m.metadata) {
-                        try {
-                            const md = JSON.parse(m.metadata);
-                            if (md.sender_role === "user" || md.sender_role === "assistant") {
-                                role = md.sender_role;
-                            }
-                        } catch {}
-                    }
-                    return {
-                        sender: role,
-                        text: m.content,
-                        timestamp: m.timestamp
-                            ? new Date(m.timestamp).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            })
-                            : "",
-                    };
-                });
+                const messages = history.map((m) => ({
+                    // тут використовуємо те, що повернув бекенд: m.role
+                    sender: m.role,
+                    text: m.content,
+                    timestamp: m?.timestamp
+                        ? new Date(m.timestamp).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        })
+                        : "",
+                }));
                 setSessions((prev) => {
                     const copy = [...prev];
                     copy[activeIndex] = { ...copy[activeIndex], messages };
@@ -93,7 +84,7 @@ function App() {
                 });
             })
             .catch(console.error);
-    }, [activeIndex, sessions]);
+    }, [activeIndex]);
 
     // автоскрол
     useEffect(() => {
