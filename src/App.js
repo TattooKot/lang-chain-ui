@@ -6,56 +6,79 @@ import {
     TextField,
     IconButton,
     Typography,
+    Avatar,
     ThemeProvider,
     createTheme,
     CssBaseline,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
+import PersonIcon from "@mui/icons-material/Person";
+import SmartToyIcon from "@mui/icons-material/SmartToy";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/600.css";
 
 const theme = createTheme({
     palette: {
-        background: {
-            default: "#1a1a1a",
-        },
+        background: { default: "#f0f2f5" },
         primary: { main: "#0088cc" },
     },
     typography: {
         fontFamily: "Inter, sans-serif",
     },
+    components: {
+        MuiPaper: {
+            styleOverrides: {
+                root: {
+                    transition: "background-color 0.3s ease",
+                },
+            },
+        },
+    },
 });
 
 function App() {
     const [country, setCountry] = useState("");
-    const [messages, setMessages] = useState([]);
+    const [messages, setMessages] = useState([]); // { sender, text, timestamp }
     const [streaming, setStreaming] = useState(false);
     const [conversationId, setConversationId] = useState("");
     const chatEndRef = useRef(null);
 
+    // автоскрол
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
+
+    const addMessage = (sender, text) => {
+        setMessages((prev) => [
+            ...prev,
+            {
+                sender,
+                text,
+                timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+            },
+        ]);
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!country.trim() || streaming) return;
 
-        // Очищаємо попередні повідомлення та ID
-        setMessages([{ sender: "user", text: country.trim() }, { sender: "bot", text: "" }]);
+        // Нова сесія чи новий меседж
+        setMessages([]);
         setConversationId("");
+        addMessage("user", country.trim());
+        addMessage("bot", ""); // placeholder
         setStreaming(true);
 
-        const res = await fetch("http://localhost:8000/stream-capital", {
+        const res = await fetch("http://localhost:8000/stream-chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ country }),
+            body: JSON.stringify({ message: country }),
         });
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -67,21 +90,21 @@ function App() {
             let newText = "";
             for (const part of parts) {
                 if (part.startsWith("event: conversation_id")) {
-                    const id = part.replace("event: conversation_id\n", "").replace("data: ", "").trim();
+                    const id = part.split("\n")[1].replace("data: ", "").trim();
                     setConversationId(id);
+                } else if (part.startsWith("event: token")) {
+                    newText += part.split("\n")[1].replace("data: ", "");
                 }
-                else if (part.startsWith("event: token")) {
-                    const chunk = part.replace(/^event: token\n/, "").replace(/^data: /, "");
-                    newText += chunk;
-                }
-                // ігноруємо event: done
             }
             if (newText) {
                 setMessages((prev) => {
                     const updated = [...prev];
-                    // додаємо новий текст до останнього повідомлення bot
                     const last = updated[updated.length - 1];
-                    updated[updated.length - 1] = { ...last, text: last.text + newText };
+                    updated[updated.length - 1] = {
+                        ...last,
+                        text: last.text + newText,
+                        // keep the original bot timestamp
+                    };
                     return updated;
                 });
             }
@@ -100,16 +123,12 @@ function App() {
                     display: "flex",
                     justifyContent: "center",
                     alignItems: "center",
+                    bgcolor: "background.default",
                     p: 2,
-                    backgroundColor: "#1a1a1a",
-                    backgroundImage: `url(${process.env.PUBLIC_URL}/bg/chat-bg.png)`,
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "center center",
-                    backgroundSize: "cover",
                 }}
             >
                 <Paper
-                    elevation={4}
+                    elevation={6}
                     sx={{
                         width: "100%",
                         maxWidth: 600,
@@ -121,30 +140,22 @@ function App() {
                     }}
                 >
                     {/* Header */}
-                    <Box sx={{ p: 2, bgcolor: "primary.main" }}>
-                        <Typography
-                            variant="h6"
-                            sx={{ color: "white", fontWeight: 600, textAlign: "center" }}
-                        >
-                            Capital Finder
-                        </Typography>
-                        {conversationId && (
-                            <Typography
-                                variant="body2"
-                                sx={{ color: "white", textAlign: "center", mt: 0.5 }}
-                            >
-                                ID діалогу: {conversationId}
+                    <Box sx={{ p: 2, bgcolor: "primary.main", color: "white" }}>
+                        <Typography variant="h6" sx={{ fontWeight: 600, textAlign: "center" }}>
+                            Chat &nbsp;
+                            <Typography component="span" variant="caption">
+                                {conversationId && `(ID: ${conversationId})`}
                             </Typography>
-                        )}
+                        </Typography>
                     </Box>
 
-                    {/* Messages */}
+                    {/* Chat area */}
                     <Box
                         sx={{
                             flex: 1,
                             overflowY: "auto",
                             p: 2,
-                            bgcolor: "#f0f0f0",
+                            bgcolor: "#ffffff",
                         }}
                     >
                         {messages.map((m, i) => (
@@ -152,27 +163,46 @@ function App() {
                                 key={i}
                                 sx={{
                                     display: "flex",
-                                    justifyContent:
-                                        m.sender === "user" ? "flex-end" : "flex-start",
+                                    alignItems: "flex-end",
+                                    justifyContent: m.sender === "user" ? "flex-end" : "flex-start",
                                     mb: 1.5,
                                 }}
                             >
+                                {m.sender === "bot" && (
+                                    <Avatar sx={{ bgcolor: "#e0e0e0", mr: 1 }}>
+                                        <SmartToyIcon color="primary" />
+                                    </Avatar>
+                                )}
                                 <Paper
                                     sx={{
                                         p: 1.5,
-                                        bgcolor: m.sender === "user" ? "primary.main" : "white",
+                                        bgcolor: m.sender === "user" ? "#0088cc" : "#f5f5f5",
                                         color: m.sender === "user" ? "white" : "black",
                                         maxWidth: "75%",
                                         borderRadius: 2,
-                                        borderTopRightRadius:
-                                            m.sender === "user" ? 0 : 2,
-                                        borderTopLeftRadius:
-                                            m.sender === "user" ? 2 : 0,
+                                        position: "relative",
                                     }}
-                                    elevation={1}
                                 >
-                                    <Typography variant="body1">{m.text}</Typography>
+                                    <Typography variant="body1" sx={{ mb: 0.5 }}>
+                                        {m.text}
+                                    </Typography>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{
+                                            position: "absolute",
+                                            bottom: 4,
+                                            right: 8,
+                                            opacity: 0.6,
+                                        }}
+                                    >
+                                        {m.timestamp}
+                                    </Typography>
                                 </Paper>
+                                {m.sender === "user" && (
+                                    <Avatar sx={{ bgcolor: "#0088cc", ml: 1 }}>
+                                        <PersonIcon sx={{ color: "white" }} />
+                                    </Avatar>
+                                )}
                             </Box>
                         ))}
                         <div ref={chatEndRef} />
@@ -186,12 +216,13 @@ function App() {
                             display: "flex",
                             alignItems: "center",
                             p: 1,
-                            bgcolor: "#ffffff",
+                            bgcolor: "#fafafa",
+                            borderTop: "1px solid #ddd",
                         }}
                     >
                         <TextField
                             variant="outlined"
-                            placeholder="Enter country..."
+                            placeholder="Type your message..."
                             value={country}
                             onChange={(e) => setCountry(e.target.value)}
                             disabled={streaming}
