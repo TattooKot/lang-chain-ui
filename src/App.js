@@ -30,6 +30,7 @@ function App() {
     const [country, setCountry] = useState("");
     const [messages, setMessages] = useState([]);
     const [streaming, setStreaming] = useState(false);
+    const [conversationId, setConversationId] = useState("");
     const chatEndRef = useRef(null);
 
     useEffect(() => {
@@ -40,12 +41,9 @@ function App() {
         e.preventDefault();
         if (!country.trim() || streaming) return;
 
-        // Додаємо user-повідомлення
-        setMessages((prev) => [
-            ...prev,
-            { sender: "user", text: country.trim() },
-            { sender: "bot", text: "" }, // зарезервована бульбашка для bot
-        ]);
+        // Очищаємо попередні повідомлення та ID
+        setMessages([{ sender: "user", text: country.trim() }, { sender: "bot", text: "" }]);
+        setConversationId("");
         setStreaming(true);
 
         const res = await fetch("http://localhost:8000/stream-capital", {
@@ -68,18 +66,22 @@ function App() {
 
             let newText = "";
             for (const part of parts) {
-                if (part.startsWith("event: done")) continue;
-                if (part.startsWith("data: ")) {
-                    newText += part.replace(/^data: /, "");
+                if (part.startsWith("event: conversation_id")) {
+                    const id = part.replace("event: conversation_id\n", "").replace("data: ", "").trim();
+                    setConversationId(id);
                 }
+                else if (part.startsWith("event: token")) {
+                    const chunk = part.replace(/^event: token\n/, "").replace(/^data: /, "");
+                    newText += chunk;
+                }
+                // ігноруємо event: done
             }
             if (newText) {
                 setMessages((prev) => {
                     const updated = [...prev];
-                    updated[updated.length - 1] = {
-                        sender: "bot",
-                        text: updated[updated.length - 1].text + newText,
-                    };
+                    // додаємо новий текст до останнього повідомлення bot
+                    const last = updated[updated.length - 1];
+                    updated[updated.length - 1] = { ...last, text: last.text + newText };
                     return updated;
                 });
             }
@@ -126,6 +128,14 @@ function App() {
                         >
                             Capital Finder
                         </Typography>
+                        {conversationId && (
+                            <Typography
+                                variant="body2"
+                                sx={{ color: "white", textAlign: "center", mt: 0.5 }}
+                            >
+                                ID діалогу: {conversationId}
+                            </Typography>
+                        )}
                     </Box>
 
                     {/* Messages */}
