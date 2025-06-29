@@ -1,4 +1,3 @@
-// src/App.js
 import { useState, useRef, useEffect } from "react";
 import {
     Box,
@@ -17,10 +16,13 @@ import {
     CssBaseline,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
+import DeleteIcon from "@mui/icons-material/Delete";
 import PersonIcon from "@mui/icons-material/Person";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/600.css";
+
+const API = "http://localhost:8000";
 
 const theme = createTheme({
     palette: {
@@ -32,45 +34,35 @@ const theme = createTheme({
 
 function App() {
     const [input, setInput] = useState("");
-    const [sessions, setSessions] = useState([]); // [{id, messages: []}, …]
+    const [sessions, setSessions] = useState([]);
     const [activeIndex, setActiveIndex] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const chatEndRef = useRef(null);
 
-    // 1. На старті з бекенду отримуємо всі saved sessions
     useEffect(() => {
-        async function loadSessions() {
-            try {
-                const res = await fetch("http://localhost:8000/sessions");
-                const data = await res.json();
-                // Створюємо локальний масив сесій із порожньою історією
+        fetch(`${API}/sessions`)
+            .then((r) => r.json())
+            .then((data) => {
                 const initial = data.sessions.map((id) => ({ id, messages: [] }));
                 setSessions(initial);
-                if (initial.length > 0) setActiveIndex(0);
-            } catch (err) {
-                console.error("Cannot load sessions:", err);
-            }
-        }
-        loadSessions();
+                if (initial.length) setActiveIndex(0);
+            })
+            .catch(console.error);
     }, []);
 
-    // автоскрол
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [sessions, activeIndex]);
 
     const appendToActive = (sender, text) => {
-        const timestamp = new Date().toLocaleTimeString([], {
+        const ts = new Date().toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
         });
         setSessions((prev) => {
             const copy = [...prev];
             const sess = { ...copy[activeIndex] };
-            sess.messages = [
-                ...sess.messages,
-                { sender, text, timestamp },
-            ];
+            sess.messages = [...sess.messages, { sender, text, timestamp: ts }];
             copy[activeIndex] = sess;
             return copy;
         });
@@ -81,80 +73,94 @@ function App() {
         setActiveIndex(sessions.length);
     };
 
+    const handleDeleteSession = async (idx) => {
+        const id = sessions[idx].id;
+        if (!id) return;
+        await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
+        setSessions((prev) => {
+            const copy = prev.filter((_, i) => i !== idx);
+            if (activeIndex === idx) setActiveIndex(copy.length ? 0 : null);
+            else if (activeIndex > idx) setActiveIndex(activeIndex - 1);
+            return copy;
+        });
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         const text = input.trim();
         if (!text || streaming || activeIndex === null) return;
 
-        // Додаємо user + placeholder bot
         appendToActive("user", text);
-        appendToActive("bot", "");
+        appendToActive("assistant", ""); // placeholder
 
         setStreaming(true);
         setInput("");
 
-        // Формуємо тіло з conversation_id, якщо є
         const body = { message: text };
-        const convId = sessions[activeIndex].id;
-        if (convId) body.conversation_id = convId;
+        const sid = sessions[activeIndex].id;
+        if (sid) body.conversation_id = sid;
 
-        const res = await fetch("http://localhost:8000/stream-chat", {
+        console.log("Sending body:", body);
+        const res = await fetch(`${API}/chime/stream-chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
 
+        if (!res.ok) {
+            const err = await res.json();
+            console.error("422 Validation error:", err);
+            setStreaming(false);
+            return;
+        }
+
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = "";
+        let buf = "";
 
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            const parts = buffer.split("\n\n");
-            buffer = parts.pop();
+            buf += decoder.decode(value, { stream: true });
+            const parts = buf.split("\n\n");
+            buf = parts.pop();
 
             let newText = "";
             let newId = null;
 
-            parts.forEach((part) => {
-                if (part.startsWith("event: conversation_id")) {
-                    newId = part.split("\n")[1].replace("data: ", "").trim();
-                } else if (part.startsWith("event: token")) {
-                    newText += part.split("\n")[1].replace("data: ", "");
+            parts.forEach((p) => {
+                if (p.startsWith("event: conversation_id")) {
+                    newId = p.split("\n")[1].replace("data: ", "").trim();
+                } else if (p.startsWith("event: token")) {
+                    newText += p.split("\n")[1].replace("data: ", "");
                 }
             });
 
             if (newId) {
-                // Оновлюємо id активної сесії
-                setSessions((prev) => {
-                    const copy = [...prev];
-                    copy[activeIndex].id = newId;
-                    return copy;
-                });
-                // Якщо це новий id, додаємо його в список бекенд-сесій
-                setSessions((prev) => {
-                    if (!prev.find((s) => s.id === newId)) {
-                        const updated = [...prev];
-                        updated[activeIndex].id = newId;
-                        return updated;
-                    }
-                    return prev;
-                });
+                console.log("Received conversation_id:", newId);
+                setSessions((prev) =>
+                    prev.map((s, i) => (i === activeIndex ? { ...s, id: newId } : s))
+                );
             }
 
             if (newText) {
-                // Додаємо токен в останнє bot-повідомлення
-                appendToActive("bot", newText);
+                setSessions((prev) => {
+                    const copy = [...prev];
+                    const sess = { ...copy[activeIndex] };
+                    const msgs = [...sess.messages];
+                    const last = msgs[msgs.length - 1];
+                    msgs[msgs.length - 1] = { ...last, text: last.text + newText };
+                    sess.messages = msgs;
+                    copy[activeIndex] = sess;
+                    return copy;
+                });
             }
         }
 
         setStreaming(false);
     };
 
-    const activeSession = sessions[activeIndex] || { messages: [] };
+    const active = sessions[activeIndex] || { id: "", messages: [] };
 
     return (
         <ThemeProvider theme={theme}>
@@ -169,14 +175,26 @@ function App() {
                     </Box>
                     <Divider />
                     <List>
-                        {sessions.map((s, idx) => (
+                        {sessions.map((s, i) => (
                             <ListItemButton
-                                key={idx}
-                                selected={idx === activeIndex}
-                                onClick={() => setActiveIndex(idx)}
+                                key={i}
+                                selected={i === activeIndex}
+                                onClick={() => setActiveIndex(i)}
                             >
+                                <IconButton
+                                    edge="start"
+                                    size="small"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteSession(i);
+                                    }}
+                                    disabled={streaming}
+                                    sx={{ mr: 1 }}
+                                >
+                                    <DeleteIcon fontSize="small" />
+                                </IconButton>
                                 <ListItemText
-                                    primary={s.id ? `Chat ${idx + 1}` : "New Chat"}
+                                    primary={s.id ? `Chat ${i + 1}` : "New Chat"}
                                     secondary={s.id}
                                     primaryTypographyProps={{ noWrap: true }}
                                     secondaryTypographyProps={{ noWrap: true }}
@@ -193,7 +211,7 @@ function App() {
                         flex: 1,
                         display: "flex",
                         flexDirection: "column",
-                        margin: 2,
+                        m: 2,
                         borderRadius: 2,
                         overflow: "hidden",
                     }}
@@ -201,25 +219,23 @@ function App() {
                     {/* Header */}
                     <Box sx={{ p: 2, bgcolor: "primary.main", color: "white" }}>
                         <Typography variant="h6">
-                            {activeSession.id ? `Chat #${activeIndex + 1}` : "New Chat"}
+                            {active.id ? `Chat #${activeIndex + 1}` : "New Chat"}
                         </Typography>
-                        {activeSession.id && (
-                            <Typography variant="caption">ID: {activeSession.id}</Typography>
-                        )}
+                        {active.id && <Typography variant="caption">ID: {active.id}</Typography>}
                     </Box>
 
                     {/* Messages */}
                     <Box sx={{ flex: 1, overflowY: "auto", p: 2, bgcolor: "#f9f9f9" }}>
-                        {activeSession.messages.map((m, i) => (
+                        {active.messages.map((m, idx) => (
                             <Box
-                                key={i}
+                                key={idx}
                                 sx={{
                                     display: "flex",
                                     justifyContent: m.sender === "user" ? "flex-end" : "flex-start",
                                     mb: 1.5,
                                 }}
                             >
-                                {m.sender === "bot" && (
+                                {m.sender === "assistant" && (
                                     <Avatar sx={{ bgcolor: "#e0e0e0", mr: 1 }}>
                                         <SmartToyIcon color="primary" />
                                     </Avatar>
@@ -232,6 +248,7 @@ function App() {
                                         maxWidth: "75%",
                                         position: "relative",
                                     }}
+                                    elevation={1}
                                 >
                                     <Typography variant="body1" sx={{ mb: 0.5 }}>
                                         {m.text}
