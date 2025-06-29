@@ -1,3 +1,4 @@
+// src/App.js
 import { useState, useRef, useEffect } from "react";
 import {
     Box,
@@ -34,22 +35,55 @@ const theme = createTheme({
 
 function App() {
     const [input, setInput] = useState("");
+    // sessions: { id: string, channelArn: string, messages: [] }
     const [sessions, setSessions] = useState([]);
     const [activeIndex, setActiveIndex] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const chatEndRef = useRef(null);
 
+    // 1) Завантажити список сесій із Postgres
     useEffect(() => {
         fetch(`${API}/sessions`)
             .then((r) => r.json())
             .then((data) => {
-                const initial = data.sessions.map((id) => ({ id, messages: [] }));
+                // data.sessions: [{ id, channel_arn }, ...]
+                const initial = data.sessions.map(({ id, channel_arn }) => ({
+                    id,
+                    channelArn: channel_arn,
+                    messages: [],
+                }));
                 setSessions(initial);
                 if (initial.length) setActiveIndex(0);
             })
             .catch(console.error);
     }, []);
 
+    // 2) Підвантажити історію із Chime при перемиканні активної сесії
+    useEffect(() => {
+        if (activeIndex === null) return;
+        const sess = sessions[activeIndex];
+        if (!sess || !sess.channelArn) return;
+        fetch(`${API}/chime/history/${sess.id}`)
+            .then((r) => r.json())
+            .then((history) => {
+                const messages = history.map((m) => ({
+                    sender: m.role === "user" ? "user" : "assistant",
+                    text: m.content,
+                    timestamp: new Date().toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                    }),
+                }));
+                setSessions((prev) => {
+                    const copy = [...prev];
+                    copy[activeIndex] = { ...copy[activeIndex], messages };
+                    return copy;
+                });
+            })
+            .catch(console.error);
+    }, [activeIndex, sessions]);
+
+    // автоскрол
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [sessions, activeIndex]);
@@ -61,22 +95,25 @@ function App() {
         });
         setSessions((prev) => {
             const copy = [...prev];
-            const sess = { ...copy[activeIndex] };
+            const sess = copy[activeIndex];
             sess.messages = [...sess.messages, { sender, text, timestamp: ts }];
-            copy[activeIndex] = sess;
             return copy;
         });
     };
 
     const handleNewSession = () => {
-        setSessions((prev) => [...prev, { id: "", messages: [] }]);
+        setSessions((prev) => [
+            ...prev,
+            { id: "", channelArn: "", messages: [] },
+        ]);
         setActiveIndex(sessions.length);
     };
 
     const handleDeleteSession = async (idx) => {
-        const id = sessions[idx].id;
-        if (!id) return;
-        await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
+        const { id } = sessions[idx];
+        if (id) {
+            await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
+        }
         setSessions((prev) => {
             const copy = prev.filter((_, i) => i !== idx);
             if (activeIndex === idx) setActiveIndex(copy.length ? 0 : null);
@@ -96,11 +133,10 @@ function App() {
         setStreaming(true);
         setInput("");
 
+        const sess = sessions[activeIndex];
         const body = { message: text };
-        const sid = sessions[activeIndex].id;
-        if (sid) body.conversation_id = sid;
+        if (sess.id) body.conversation_id = sess.id;
 
-        console.log("Sending body:", body);
         const res = await fetch(`${API}/chime/stream-chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -108,8 +144,7 @@ function App() {
         });
 
         if (!res.ok) {
-            const err = await res.json();
-            console.error("422 Validation error:", err);
+            console.error("422 Validation error:", await res.json());
             setStreaming(false);
             return;
         }
@@ -137,21 +172,26 @@ function App() {
             });
 
             if (newId) {
-                console.log("Received conversation_id:", newId);
-                setSessions((prev) =>
-                    prev.map((s, i) => (i === activeIndex ? { ...s, id: newId } : s))
-                );
+                // зберегти internal id і оновити channelArn з відповіді сервера
+                setSessions((prev) => {
+                    const copy = [...prev];
+                    copy[activeIndex] = {
+                        ...copy[activeIndex],
+                        id: newId,
+                        channelArn: copy[activeIndex].channelArn || newId, // сервер вже створив мапінг
+                    };
+                    return copy;
+                });
             }
 
             if (newText) {
                 setSessions((prev) => {
                     const copy = [...prev];
-                    const sess = { ...copy[activeIndex] };
-                    const msgs = [...sess.messages];
-                    const last = msgs[msgs.length - 1];
-                    msgs[msgs.length - 1] = { ...last, text: last.text + newText };
-                    sess.messages = msgs;
-                    copy[activeIndex] = sess;
+                    const msgs = copy[activeIndex].messages;
+                    msgs[msgs.length - 1] = {
+                        ...msgs[msgs.length - 1],
+                        text: msgs[msgs.length - 1].text + newText,
+                    };
                     return copy;
                 });
             }
@@ -160,14 +200,14 @@ function App() {
         setStreaming(false);
     };
 
-    const active = sessions[activeIndex] || { id: "", messages: [] };
+    const active = sessions[activeIndex] || { id: "", channelArn: "", messages: [] };
 
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
             <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
                 {/* Sidebar */}
-                <Box sx={{ width: 240, borderRight: 1, borderColor: "#ddd", bgcolor: "#fff" }}>
+                <Box sx={{ width: 260, borderRight: 1, borderColor: "#ddd", bgcolor: "#fff" }}>
                     <Box sx={{ p: 1 }}>
                         <Button variant="contained" fullWidth onClick={handleNewSession}>
                             New Chat
@@ -177,7 +217,7 @@ function App() {
                     <List>
                         {sessions.map((s, i) => (
                             <ListItemButton
-                                key={i}
+                                key={s.id || i}
                                 selected={i === activeIndex}
                                 onClick={() => setActiveIndex(i)}
                             >
