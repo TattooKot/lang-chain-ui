@@ -3,18 +3,18 @@ import { useState, useRef, useEffect } from "react";
 import {
     Box,
     Paper,
-    TextField,
-    IconButton,
-    Typography,
-    Avatar,
-    ThemeProvider,
-    createTheme,
-    CssBaseline,
     List,
     ListItemButton,
     ListItemText,
     Divider,
     Button,
+    TextField,
+    IconButton,
+    Avatar,
+    Typography,
+    ThemeProvider,
+    createTheme,
+    CssBaseline,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import PersonIcon from "@mui/icons-material/Person";
@@ -26,64 +26,77 @@ const theme = createTheme({
     palette: {
         background: { default: "#f0f2f5" },
         primary: { main: "#0088cc" },
-        secondary: { main: "#ffffff" },
     },
     typography: { fontFamily: "Inter, sans-serif" },
 });
 
 function App() {
-    // Сесії: кожна має id та масив повідомлень
-    const [sessions, setSessions] = useState([
-        { id: "", messages: [] }
-    ]);
-    const [activeIndex, setActiveIndex] = useState(0);
     const [input, setInput] = useState("");
+    const [sessions, setSessions] = useState([]); // [{id, messages: []}, …]
+    const [activeIndex, setActiveIndex] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const chatEndRef = useRef(null);
 
-    // Автоскрол на нові повідомлення
+    // 1. На старті з бекенду отримуємо всі saved sessions
+    useEffect(() => {
+        async function loadSessions() {
+            try {
+                const res = await fetch("http://localhost:8000/sessions");
+                const data = await res.json();
+                // Створюємо локальний масив сесій із порожньою історією
+                const initial = data.sessions.map((id) => ({ id, messages: [] }));
+                setSessions(initial);
+                if (initial.length > 0) setActiveIndex(0);
+            } catch (err) {
+                console.error("Cannot load sessions:", err);
+            }
+        }
+        loadSessions();
+    }, []);
+
+    // автоскрол
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [sessions, activeIndex]);
 
-    const activeSession = sessions[activeIndex];
-
-    // Додати нову порцію тексту до активної сесії
     const appendToActive = (sender, text) => {
-        const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        setSessions(prev => {
+        const timestamp = new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+        setSessions((prev) => {
             const copy = [...prev];
-            copy[activeIndex] = {
-                ...copy[activeIndex],
-                messages: [
-                    ...copy[activeIndex].messages,
-                    { sender, text, timestamp }
-                ]
-            };
+            const sess = { ...copy[activeIndex] };
+            sess.messages = [
+                ...sess.messages,
+                { sender, text, timestamp },
+            ];
+            copy[activeIndex] = sess;
             return copy;
         });
     };
 
-    // Створити нову сесію
     const handleNewSession = () => {
-        setSessions(prev => [...prev, { id: "", messages: [] }]);
+        setSessions((prev) => [...prev, { id: "", messages: [] }]);
         setActiveIndex(sessions.length);
     };
 
-    const handleSubmit = async e => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         const text = input.trim();
-        if (!text || streaming) return;
+        if (!text || streaming || activeIndex === null) return;
 
+        // Додаємо user + placeholder bot
         appendToActive("user", text);
         appendToActive("bot", "");
 
         setStreaming(true);
         setInput("");
 
-        // Формуємо тіло з conversation_id
+        // Формуємо тіло з conversation_id, якщо є
         const body = { message: text };
-        if (activeSession.id) body.conversation_id = activeSession.id;
+        const convId = sessions[activeIndex].id;
+        if (convId) body.conversation_id = convId;
 
         const res = await fetch("http://localhost:8000/stream-chat", {
             method: "POST",
@@ -104,45 +117,50 @@ function App() {
             buffer = parts.pop();
 
             let newText = "";
-            let gotId = null;
+            let newId = null;
 
-            for (const part of parts) {
+            parts.forEach((part) => {
                 if (part.startsWith("event: conversation_id")) {
-                    gotId = part.split("\n")[1].replace("data: ", "").trim();
+                    newId = part.split("\n")[1].replace("data: ", "").trim();
                 } else if (part.startsWith("event: token")) {
                     newText += part.split("\n")[1].replace("data: ", "");
                 }
+            });
+
+            if (newId) {
+                // Оновлюємо id активної сесії
+                setSessions((prev) => {
+                    const copy = [...prev];
+                    copy[activeIndex].id = newId;
+                    return copy;
+                });
+                // Якщо це новий id, додаємо його в список бекенд-сесій
+                setSessions((prev) => {
+                    if (!prev.find((s) => s.id === newId)) {
+                        const updated = [...prev];
+                        updated[activeIndex].id = newId;
+                        return updated;
+                    }
+                    return prev;
+                });
             }
 
-            if (gotId) {
-                // Прописуємо id сесії
-                setSessions(prev => {
-                    const copy = [...prev];
-                    copy[activeIndex] = { ...copy[activeIndex], id: gotId };
-                    return copy;
-                });
-            }
             if (newText) {
-                // Додаємо токени до останнього bot-повідомлення
-                setSessions(prev => {
-                    const copy = [...prev];
-                    const msgs = [...copy[activeIndex].messages];
-                    const last = msgs[msgs.length - 1];
-                    msgs[msgs.length - 1] = { ...last, text: last.text + newText };
-                    copy[activeIndex] = { ...copy[activeIndex], messages: msgs };
-                    return copy;
-                });
+                // Додаємо токен в останнє bot-повідомлення
+                appendToActive("bot", newText);
             }
         }
 
         setStreaming(false);
     };
 
+    const activeSession = sessions[activeIndex] || { messages: [] };
+
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
             <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
-                {/* Сайдбар сесій */}
+                {/* Sidebar */}
                 <Box sx={{ width: 240, borderRight: 1, borderColor: "#ddd", bgcolor: "#fff" }}>
                     <Box sx={{ p: 1 }}>
                         <Button variant="contained" fullWidth onClick={handleNewSession}>
@@ -158,7 +176,7 @@ function App() {
                                 onClick={() => setActiveIndex(idx)}
                             >
                                 <ListItemText
-                                    primary={s.id ? `Chat ${idx + 1}` : `New Chat`}
+                                    primary={s.id ? `Chat ${idx + 1}` : "New Chat"}
                                     secondary={s.id}
                                     primaryTypographyProps={{ noWrap: true }}
                                     secondaryTypographyProps={{ noWrap: true }}
@@ -168,7 +186,7 @@ function App() {
                     </List>
                 </Box>
 
-                {/* Головна область чату */}
+                {/* Chat */}
                 <Paper
                     elevation={3}
                     sx={{
@@ -180,17 +198,17 @@ function App() {
                         overflow: "hidden",
                     }}
                 >
-                    {/* Хедер */}
+                    {/* Header */}
                     <Box sx={{ p: 2, bgcolor: "primary.main", color: "white" }}>
                         <Typography variant="h6">
-                            {activeSession.id ? `Chat ${activeIndex + 1}` : "New Chat"}
+                            {activeSession.id ? `Chat #${activeIndex + 1}` : "New Chat"}
                         </Typography>
                         {activeSession.id && (
                             <Typography variant="caption">ID: {activeSession.id}</Typography>
                         )}
                     </Box>
 
-                    {/* Повідомлення */}
+                    {/* Messages */}
                     <Box sx={{ flex: 1, overflowY: "auto", p: 2, bgcolor: "#f9f9f9" }}>
                         {activeSession.messages.map((m, i) => (
                             <Box
@@ -235,7 +253,7 @@ function App() {
                         <div ref={chatEndRef} />
                     </Box>
 
-                    {/* Інпут */}
+                    {/* Input */}
                     <Box
                         component="form"
                         onSubmit={handleSubmit}
@@ -245,7 +263,7 @@ function App() {
                             variant="outlined"
                             placeholder="Type your message..."
                             value={input}
-                            onChange={e => setInput(e.target.value)}
+                            onChange={(e) => setInput(e.target.value)}
                             disabled={streaming}
                             fullWidth
                             sx={{ mr: 1 }}
