@@ -1,38 +1,53 @@
-.App {
-  text-align: center;
+/* Очищуємо базові стилі */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* Встановлюємо висоту вікна в 100% */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  font-family: 'Inter', sans-serif;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+/* Тло всього застосунку */
+body {
+  background-color: #f0f2f5;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+/* Кнопка New Chat */
+.MuiButton-contained {
+  text-transform: none;
 }
 
-.App-link {
-  color: #61dafb;
+/* Список сесій */
+.MuiList-root {
+  padding-top: 0;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Поля вводу та кнопки */
+.MuiTextField-root .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline {
+  border-color: #ddd;
+}
+
+.MuiTextField-root .MuiOutlinedInput-root.Mui-disabled .MuiOutlinedInput-notchedOutline {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Мікропоштова відступи */
+.MuiBox-root {
+  /* MUI Box використовує sx, тут лише загальні скидання */
+}
+
+/* Скидання стилів Paper */
+.MuiPaper-root {
+  background-color: #fff;
+}
+
+/* Повідомлення */
+.MuiPaper-root .MuiTypography-body1 {
+  white-space: pre-wrap;
+  word-break: break-word;
 }

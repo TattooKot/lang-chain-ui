@@ -46,7 +46,6 @@ function App() {
         fetch(`${API}/sessions`)
             .then((r) => r.json())
             .then((data) => {
-                // data.sessions: [{ id, channel_arn }, ...]
                 const initial = data.sessions.map(({ id, channel_arn }) => ({
                     id,
                     channelArn: channel_arn,
@@ -58,7 +57,7 @@ function App() {
             .catch(console.error);
     }, []);
 
-    // 2) Підвантажити історію із Chime при перемиканні активної сесії
+    // 2) Підвантажити історію із Chime при зміні activeIndex
     useEffect(() => {
         if (activeIndex === null) return;
         const sess = sessions[activeIndex];
@@ -81,9 +80,9 @@ function App() {
                 });
             })
             .catch(console.error);
-    }, [activeIndex, sessions]);
+    }, [activeIndex]);
 
-    // автоскрол
+    // Автоскрол
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [sessions, activeIndex]);
@@ -111,9 +110,7 @@ function App() {
 
     const handleDeleteSession = async (idx) => {
         const { id } = sessions[idx];
-        if (id) {
-            await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
-        }
+        if (id) await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
         setSessions((prev) => {
             const copy = prev.filter((_, i) => i !== idx);
             if (activeIndex === idx) setActiveIndex(copy.length ? 0 : null);
@@ -144,7 +141,7 @@ function App() {
         });
 
         if (!res.ok) {
-            console.error("422 Validation error:", await res.json());
+            console.error("Validation error:", await res.json());
             setStreaming(false);
             return;
         }
@@ -172,13 +169,12 @@ function App() {
             });
 
             if (newId) {
-                // зберегти internal id і оновити channelArn з відповіді сервера
                 setSessions((prev) => {
                     const copy = [...prev];
                     copy[activeIndex] = {
                         ...copy[activeIndex],
                         id: newId,
-                        channelArn: copy[activeIndex].channelArn || newId, // сервер вже створив мапінг
+                        channelArn: copy[activeIndex].channelArn || newId,
                     };
                     return copy;
                 });
@@ -200,7 +196,8 @@ function App() {
         setStreaming(false);
     };
 
-    const active = sessions[activeIndex] || { id: "", channelArn: "", messages: [] };
+    const active =
+        sessions[activeIndex] || { id: "", channelArn: "", messages: [] };
 
     return (
         <ThemeProvider theme={theme}>
@@ -271,7 +268,8 @@ function App() {
                                 key={idx}
                                 sx={{
                                     display: "flex",
-                                    justifyContent: m.sender === "user" ? "flex-end" : "flex-start",
+                                    justifyContent:
+                                        m.sender === "user" ? "flex-end" : "flex-start",
                                     mb: 1.5,
                                 }}
                             >
@@ -295,7 +293,12 @@ function App() {
                                     </Typography>
                                     <Typography
                                         variant="caption"
-                                        sx={{ position: "absolute", bottom: 4, right: 8, opacity: 0.6 }}
+                                        sx={{
+                                            position: "absolute",
+                                            bottom: 4,
+                                            right: 8,
+                                            opacity: 0.6,
+                                        }}
                                     >
                                         {m.timestamp}
                                     </Typography>
@@ -325,7 +328,11 @@ function App() {
                             fullWidth
                             sx={{ mr: 1 }}
                         />
-                        <IconButton color="primary" type="submit" disabled={streaming || !input.trim()}>
+                        <IconButton
+                            color="primary"
+                            type="submit"
+                            disabled={streaming || !input.trim()}
+                        >
                             <SendIcon />
                         </IconButton>
                     </Box>
