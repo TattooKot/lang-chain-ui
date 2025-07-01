@@ -1,70 +1,87 @@
-# Getting Started with Create React App
+# Frontend Application README
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Цей файл містить інструкції для запуску та налаштування фронтенд-частини застосунку.
 
-## Available Scripts
+## Prerequisites
 
-In the project directory, you can run:
+- Node.js (>=16)
+- npm або yarn
+- Backend має бути запущений за адресою http://localhost:8000
 
-### `npm start`
+## Інсталяція
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+```bash
+# Клонувати репозиторій (якщо ще не зробили)
+git clone <your-repo-url>
+cd <your-frontend-folder>
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+# Встановити залежності
+npm install
+# або
+yarn install
+```
 
-### `npm test`
+## Налаштування
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Створіть файл `.env` у корені фронтенду з наступними змінними:
 
-### `npm run build`
+```dotenv
+REACT_APP_API_URL=http://localhost:8000
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+За потреби змініть URL на адресу вашого бекенду.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Запуск в режимі розробки
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+npm start
+# або
+yarn start
+```
 
-### `npm run eject`
+Відкриється сторінка за замовчуванням у браузері: http://localhost:3000.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Збірка для продакшн
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm run build
+# або
+yarn build
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Згенерована папка `build/` містить готовий продакшн-білд.
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Використані технології
 
-## Learn More
+- React (Hooks)
+- Material UI
+- AWS Chime SDK via FastAPI backend
+- Fetch API для взаємодії з сервером
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## Основні команди
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+- `npm start` — запуск у режимі розробки
+- `npm run build` — збірка для продакшн
+- `npm test` — запуск тестів (якщо додані)
+- `npm lint` — перевірка стилю коду
 
-### Code Splitting
+## Формат та структура
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+```
+src/
+├── App.js                # Головний компонент
+├── App.css               # Стилі (за потреби можна змінити MUI theme)
+├── components/           # Додаткові компоненти
+├── hooks/                # Кастомні React Hooks
+└── utils/                # Утиліти (наприклад API клієнт)
+```
 
-### Analyzing the Bundle Size
+## Розгортання
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+1. Виконайте `npm run build`.
+2. Скопіюйте вміст папки `build/` на ваш статичний хостинг (S3, Netlify, Vercel тощо).
+3. Переконайтеся, що змінна `REACT_APP_API_URL` вказує на правильний бекенд.
 
-### Making a Progressive Web App
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+> Питання та пропозиції — у розділі Issues репозиторію.
