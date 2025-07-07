@@ -360,7 +360,7 @@ function App() {
         const body = { message: text };
         if (sess.id) body.conversation_id = sess.id;
 
-        const res = await fetch(`${API}/chime/stream-chat`, {
+        const res = await fetch(`${API}/chime/post-question`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -371,55 +371,6 @@ function App() {
             setStreaming(false);
             return;
         }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const parts = buf.split("\n\n");
-            buf = parts.pop();
-
-            let newText = "";
-            let newId = null;
-
-            parts.forEach((p) => {
-                if (p.startsWith("event: conversation_id")) {
-                    newId = p.split("\n")[1].replace("data: ", "").trim();
-                } else if (p.startsWith("event: token")) {
-                    newText += p.split("\n")[1].replace("data: ", "");
-                }
-            });
-
-            if (newId) {
-                setSessions((prev) => {
-                    const copy = [...prev];
-                    copy[activeIndex] = {
-                        ...copy[activeIndex],
-                        id: newId,
-                        channelArn: copy[activeIndex].channelArn || newId,
-                    };
-                    return copy;
-                });
-            }
-
-            if (newText) {
-                setSessions((prev) => {
-                    const copy = [...prev];
-                    const msgs = copy[activeIndex].messages;
-                    msgs[msgs.length - 1] = {
-                        ...msgs[msgs.length - 1],
-                        text: msgs[msgs.length - 1].text + newText,
-                    };
-                    return copy;
-                });
-            }
-        }
-
-        setStreaming(false);
     };
 
     const active = sessions[activeIndex] || { id: "", channelArn: "", messages: [] };
