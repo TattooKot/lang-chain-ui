@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
     Box,
     Paper,
@@ -14,11 +14,14 @@ import {
     ThemeProvider,
     createTheme,
     CssBaseline,
+    Chip,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import DeleteIcon from "@mui/icons-material/Delete";
 import PersonIcon from "@mui/icons-material/Person";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
+import WifiIcon from "@mui/icons-material/Wifi";
+import WifiOffIcon from "@mui/icons-material/WifiOff";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/600.css";
 
@@ -37,7 +40,13 @@ function App() {
     const [sessions, setSessions] = useState([]);
     const [activeIndex, setActiveIndex] = useState(null);
     const [streaming, setStreaming] = useState(false);
+    const [chimeWsConnected, setChimeWsConnected] = useState(false);
+    const [currentSessionId, setCurrentSessionId] = useState(null);
+    const [reconnectAttempts, setReconnectAttempts] = useState(0);
     const chatEndRef = useRef(null);
+    const chimeWsRef = useRef(null);
+    const reconnectTimeoutRef = useRef(null);
+    const maxReconnectAttempts = 3;
 
     // Завантажити список сесій із Postgres
     useEffect(() => {
@@ -85,6 +94,217 @@ function App() {
             })
             .catch(console.error);
     }, [activeIndex]);
+
+    // Helper function to determine if we should reconnect based on close code
+    const shouldReconnectBasedOnCloseCode = useCallback((closeCode) => {
+        // Based on AWS Chime SDK documentation
+        const reconnectableCodes = [1001, 1006, 1011, 1012, 1013, 1014];
+        const nonReconnectableCodes = [4002, 4003, 4401, 4429]; // Added 4429 for rate limiting
+        
+        if (reconnectableCodes.includes(closeCode)) {
+            return true;
+        }
+        
+        if (nonReconnectableCodes.includes(closeCode)) {
+            return false;
+        }
+        
+        // For 4XXX codes, be more conservative about reconnecting
+        if (closeCode >= 4000 && closeCode < 5000) {
+            return false; // Don't auto-reconnect for most 4XXX codes
+        }
+        
+        return false;
+    }, []);
+
+    // Update message in session when receiving WebSocket updates
+    const updateMessageInSession = useCallback((sessionId, messageId, content) => {
+        setSessions((prev) => {
+            const copy = [...prev];
+            const sessionIndex = copy.findIndex(s => s.id === sessionId);
+            
+            if (sessionIndex !== -1) {
+                const session = copy[sessionIndex];
+                const messages = [...session.messages];
+                
+                // Find the message to update (usually the last assistant message)
+                const messageIndex = messages.findIndex(m => 
+                    m.sender === "assistant" && 
+                    (m.messageId === messageId || messages.indexOf(m) === messages.length - 1)
+                );
+                
+                if (messageIndex !== -1) {
+                    messages[messageIndex] = {
+                        ...messages[messageIndex],
+                        text: content,
+                        messageId: messageId
+                    };
+                    
+                    copy[sessionIndex] = { ...session, messages };
+                }
+            }
+            
+            return copy;
+        });
+    }, []);
+
+    // Clean up WebSocket connection
+    const cleanupWebSocket = useCallback(() => {
+        if (chimeWsRef.current) {
+            console.log("Cleaning up WebSocket connection");
+            chimeWsRef.current.close(1000, "Normal closure");
+            chimeWsRef.current = null;
+            setChimeWsConnected(false);
+        }
+        
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+        
+        setReconnectAttempts(0);
+    }, []);
+
+    // AWS Chime WebSocket connection management
+    const connectToChimeWebSocket = useCallback(async (sessionId) => {
+        // Prevent multiple connections to the same session
+        if (currentSessionId === sessionId && chimeWsRef.current?.readyState === WebSocket.OPEN) {
+            console.log("WebSocket already connected to session:", sessionId);
+            return;
+        }
+
+        // Clean up any existing connection
+        cleanupWebSocket();
+
+        try {
+            console.log("Connecting to Chime WebSocket for session:", sessionId);
+            
+            // Get the signed AWS Chime WebSocket URL from backend
+            const response = await fetch(`${API}/chime/websocket-url/${sessionId}`);
+            if (!response.ok) {
+                throw new Error(`Failed to get WebSocket URL: ${response.status}, ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log("Got Chime WebSocket URL for session:", sessionId);
+            
+            // Connect directly to AWS Chime WebSocket with proper URL
+            const chimeWs = new WebSocket(data.websocket_url);
+            
+            chimeWs.onopen = () => {
+                console.log("Connected to AWS Chime WebSocket for session:", sessionId);
+                setChimeWsConnected(true);
+                setCurrentSessionId(sessionId);
+                setReconnectAttempts(0);
+            };
+            
+            chimeWs.onmessage = (chimeEvent) => {
+                try {
+                    const chimeData = JSON.parse(chimeEvent.data);
+                    console.log("Received Chime WebSocket message:", chimeData);
+                    
+                    // Handle different event types according to Chime SDK documentation
+                    const headers = chimeData.Headers || {};
+                    const eventType = headers['x-amz-chime-event-type'];
+                    
+                    switch (eventType) {
+                        case 'SESSION_ESTABLISHED':
+                            console.log("Chime WebSocket session established");
+                            break;
+                            
+                        case 'CREATE_CHANNEL_MESSAGE':
+                        case 'UPDATE_CHANNEL_MESSAGE':
+                            try {
+                                const payload = JSON.parse(chimeData.Payload);
+                                console.log("Channel message event:", payload);
+                                
+                                // Update message in session
+                                if (payload.MessageId && payload.Content) {
+                                    updateMessageInSession(sessionId, payload.MessageId, payload.Content);
+                                }
+                            } catch (payloadError) {
+                                console.error("Error parsing message payload:", payloadError);
+                            }
+                            break;
+                            
+                        case 'CHANNEL_DETAILS':
+                            try {
+                                const payload = JSON.parse(chimeData.Payload);
+                                console.log("Channel details:", payload);
+                                // Handle channel details if needed
+                            } catch (payloadError) {
+                                console.error("Error parsing channel details:", payloadError);
+                            }
+                            break;
+                            
+                        default:
+                            console.log("Unhandled Chime event type:", eventType, chimeData);
+                    }
+                } catch (error) {
+                    console.error("Error parsing Chime WebSocket message:", error);
+                }
+            };
+            
+            chimeWs.onclose = (event) => {
+                console.log("AWS Chime WebSocket disconnected", event.code, event.reason);
+                setChimeWsConnected(false);
+                
+                // Only attempt reconnection if this is still the current session
+                if (currentSessionId === sessionId) {
+                    const shouldReconnect = shouldReconnectBasedOnCloseCode(event.code);
+                    const canReconnect = reconnectAttempts < maxReconnectAttempts;
+                    
+                    if (shouldReconnect && canReconnect) {
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Exponential backoff, max 30s
+                        console.log(`Attempting to reconnect to Chime WebSocket in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+                        
+                        setReconnectAttempts(prev => prev + 1);
+                        reconnectTimeoutRef.current = setTimeout(() => {
+                            connectToChimeWebSocket(sessionId);
+                        }, delay);
+                    } else {
+                        console.log("Not reconnecting:", { shouldReconnect, canReconnect, attempts: reconnectAttempts });
+                        setCurrentSessionId(null);
+                    }
+                }
+            };
+            
+            chimeWs.onerror = (error) => {
+                console.error("AWS Chime WebSocket error:", error);
+                setChimeWsConnected(false);
+            };
+            
+            chimeWsRef.current = chimeWs;
+            
+        } catch (error) {
+            console.error("Error connecting to Chime WebSocket:", error);
+            setChimeWsConnected(false);
+            setCurrentSessionId(null);
+        }
+    }, [currentSessionId, reconnectAttempts, shouldReconnectBasedOnCloseCode, updateMessageInSession, cleanupWebSocket]);
+
+    // Connect to WebSocket when active session changes
+    useEffect(() => {
+        if (activeIndex !== null && sessions[activeIndex]?.id) {
+            const sessionId = sessions[activeIndex].id;
+            
+            // Only connect if we're switching to a different session
+            if (sessionId !== currentSessionId) {
+                connectToChimeWebSocket(sessionId);
+            }
+        } else {
+            // No active session, clean up connection
+            cleanupWebSocket();
+            setCurrentSessionId(null);
+        }
+    }, [activeIndex, sessions.length > 0 ? sessions[activeIndex]?.id : null]); // More specific dependencies
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            cleanupWebSocket();
+        };
+    }, [cleanupWebSocket]);
 
     // автоскрол
     useEffect(() => {
@@ -259,11 +479,23 @@ function App() {
                     }}
                 >
                     {/* Header */}
-                    <Box sx={{ p: 2, bgcolor: "primary.main", color: "white" }}>
-                        <Typography variant="h6">
-                            {active.id ? `Chat #${activeIndex + 1}` : "New Chat"}
-                        </Typography>
-                        {active.id && <Typography variant="caption">ID: {active.id}</Typography>}
+                    <Box sx={{ p: 2, bgcolor: "primary.main", color: "white", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <Box>
+                            <Typography variant="h6">
+                                {active.id ? `Chat #${activeIndex + 1}` : "New Chat"}
+                            </Typography>
+                            {active.id && <Typography variant="caption">ID: {active.id}</Typography>}
+                        </Box>
+                        <Box sx={{ display: "flex", gap: 1 }}>
+                            <Chip
+                                icon={chimeWsConnected ? <WifiIcon /> : <WifiOffIcon />}
+                                label="Chime WebSocket"
+                                size="small"
+                                color={chimeWsConnected ? "success" : "error"}
+                                variant="outlined"
+                                sx={{ color: "white", borderColor: "white" }}
+                            />
+                        </Box>
                     </Box>
 
                     {/* Messages */}
